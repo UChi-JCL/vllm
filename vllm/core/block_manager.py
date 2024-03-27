@@ -10,9 +10,49 @@ from vllm.worker.cache_engine import CacheEngine, CacheEngineManager
 from vllm.utils import Device
 from vllm.core.evictor import Evictor, EvictionPolicy, make_evictor
 from vllm._C import cache_ops
+from vllm.kvloader.simplekvloader import loader
 
 import torch
 KVCache = Tuple[torch.Tensor, torch.Tensor]
+
+import time
+
+
+import cProfile, pstats, io
+from pstats import SortKey
+pr = cProfile.Profile()
+pr.enable()
+# ... do something ...
+pr.disable()
+s = io.StringIO()
+sortby = SortKey.CUMULATIVE
+ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+ps.print_stats()
+print(s.getvalue())
+
+class Timer:
+    def __init__(self, contains_list = False):
+        self.total_time = 0
+        self.last = None
+        self.contains_list = contains_list
+        if self.contains_list:
+            self.time_list = []
+    
+    def clear(self):
+        self.total_time = 0
+    
+    def start(self):
+        self.last = time.time()
+        
+    def pause(self):
+        delta = time.time() - self.last
+        self.total_time += delta
+        if self.contains_list:
+            self.time_list.append(delta)
+        self.last = None
+        
+loading_timer = Timer()
+memcpy_timer = Timer()
 
 class BlockAllocator:
     """Manages free physical token blocks for a device.
@@ -58,8 +98,9 @@ class BlockAllocator:
         self.current_num_blocks += 1
         return block
 
+    
     @staticmethod
-    def fill_kv_block( 
+    def fill_block( 
             src_kv_pair: KVCache, 
             dst_buffer: KVCache,
             block: PhysicalTokenBlock
@@ -76,32 +117,39 @@ class BlockAllocator:
         Raise:
             RuntimeError: if src's shape is not expected
         """
-
-        ''' 
-        check size of src tensor
-        '''
-        block_size = block.block_size
+        
+        # check dtype 
         k, v = src_kv_pair
-        assert(k.shape[0] == block_size)
-        assert(v.shape[0] == block_size)
+        k_buffer, v_buffer = dst_buffer
+        assert torch.is_floating_point(k)
+        assert torch.is_floating_point(v)
+        assert torch.is_floating_point(k_buffer)
+        assert torch.is_floating_point(v_buffer)
+        assert k.device == v.device
+        assert k_buffer.device == v_buffer.device
+        # check shape
+        block_size = block.block_size
+        assert k.shape[0] == block_size
+        assert v.shape[0] == block_size
+        assert k.numel() == k_buffer[0].numel()
 
-        '''
-        slot_mapping: a list of num_token elements. slot_mapping[i] means the slot index (flattened index) of the token
-        '''
-        print("\033[31mHERE: filling KV cache\033[0m")
-        slot_mapping = torch.arange(block_size) + block.block_number * block_size
-        slot_mapping = slot_mapping.to("cuda")
-        cache_ops.reshape_and_cache(src_kv_pair[0], src_kv_pair[1], dst_buffer[0], dst_buffer[1],
-                                    slot_mapping, "auto")
-
+        # slot_mapping: a list of num_token elements.
+        # slot_mapping[i] means the slot index (flattened index) of the token
+        # slot_mapping = slot_mapping.to(k.device)
+        memcpy_timer.start()
+        cache_ops.reshape_and_cache(
+            k.to(k_buffer.device, non_blocking=True),
+            v.to(v_buffer.device, non_blocking=True),
+            k_buffer,
+            v_buffer,
+            torch.arange(block.block_number * block_size, block.block_number * block_size + block_size, device='cuda'),
+            "auto")
+        memcpy_timer.pause()
 
     def allocate(self,
                  block_hash: Optional[int] = None,
                  num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
-        # If caching is disabled, just allocate a new block and return it
-        #print("\033[32mIn allcate()!\033[0m")
         if not self.enable_caching:
-            #print("\033[31mCaching is not enabled!\033[0m")
             block = self.allocate_block(next(self.default_hash_ctr),
                                         num_hashed_tokens)
             block.ref_count += 1
@@ -110,7 +158,6 @@ class BlockAllocator:
         if block_hash is None:
             block_hash = next(self.default_hash_ctr)
         if block_hash in self.evictor:
-            #print(f"\033[34mFound {block_hash} already in the evictor!\033[0m")
             assert block_hash not in self.cached_blocks
             block = self.evictor.remove(block_hash)
             assert block.ref_count == 0
@@ -119,11 +166,27 @@ class BlockAllocator:
             assert block.block_hash == block_hash
             return block
         if block_hash not in self.cached_blocks:
-            #print(f"\033[35mAllocating a new block with {block_hash}\033[0m")
             self.cached_blocks[block_hash] = self.allocate_block(
-                block_hash, num_hashed_tokens)
+                block_hash, num_hashed_tokens) 
+            
+            if block_hash in loader:
+                loading_timer.start()
+                block = self.cached_blocks[block_hash]
+                kvcaches = loader[block_hash]
+                gpucache = CacheEngineManager.GetCacheEngine().gpu_cache
+                for layer, kvcache in enumerate(kvcaches):
+                    # 3.8s runtime
+                    BlockAllocator.fill_block(
+                        kvcache,
+                        gpucache[layer],
+                        block
+                    )
+                # set the block as computed.
+                block.computed = True
+                loading_timer.pause()
+            else:
+                pass
 
-        #print(f"\033[35mFound {block_hash} already in the cache!\033[0m")
         block = self.cached_blocks[block_hash]
         assert block.block_hash == block_hash
         block.ref_count += 1
