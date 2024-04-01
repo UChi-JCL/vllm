@@ -15,6 +15,5 @@ class SimpleKVLoader(KVLoaderBase):
     
     def __contains__(self, hash: int) -> bool:
         return hash in self.cache
-    
 
 loader = SimpleKVLoader()
