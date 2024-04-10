@@ -12,30 +12,41 @@ import time
 import pickle
 from pathlib import Path
 
+import vllm
+from vllm.kvloader.diskkvloader import DiskKVLoader
+from vllm.kvloader.diskcachegenloader import DiskCachegenLoader
+
+# # disk loader
+# vllm.core.block_manager.loader = DiskKVLoader("/local/kuntai/cache/kvcache")
+# cachegen loader
+vllm.core.block_manager.loader = DiskCachegenLoader("/local/kuntai/cache/kvcache_compressed")
 
 
-long_prompt = ["You are an expert school principal in JCL library oh please"] * 1333
+
+# 15 tokens x 1000
+long_prompt = ["You are an expert in large language models, aren't you? "] * 1000
 long_prompt = ' '.join(long_prompt)
 
 
 
 
 sampling_params = SamplingParams(temperature=0, max_tokens=1)
-llm = LLM(model="TheBloke/CodeLlama-34B-AWQ", enable_prefix_caching=True, quantization='AWQ',enforce_eager=True,dtype="float16")
+llm = LLM(model="TheBloke/CodeLlama-34B-AWQ", enable_prefix_caching=True, enforce_eager=True, quantization='AWQ',dtype="float16", block_size=32)
+
+
+# # kv cache: disk ---> memory
+# total_timer = Timer()
+# total_timer.start()
+# st = time.time()
+# kv_path = Path('/local/kuntai/cache/kvcache')
+# for file in tqdm(list(kv_path.iterdir())):
+#     loader.cache[int(file.stem)] = torch.load(file)
+# print('Disk -> CPU time: ', time.time() - st)
 
 
 
-# kv cache: disk ---> memory
 total_timer = Timer()
 total_timer.start()
-st = time.time()
-kv_path = Path('/local/kuntai/cache/kvcache')
-for file in tqdm(list(kv_path.iterdir())):
-    loader.cache[int(file.stem)] = torch.load(file)
-print('Disk -> CPU time: ', time.time() - st)
-
-
-
 # implicitly load kv cache to GPU in `allocate` function, inside vllm/core/block_manager.py
 # to search that part of code, grep loading_timer
 output = llm.generate(long_prompt, sampling_params)

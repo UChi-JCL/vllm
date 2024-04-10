@@ -10,10 +10,13 @@ from vllm.worker.cache_engine import CacheEngine, CacheEngineManager
 from vllm.utils import Device
 from vllm.core.evictor import Evictor, EvictionPolicy, make_evictor
 from vllm._C import cache_ops
-from vllm.kvloader.simplekvloader import loader
+
+loader = {}
 
 import torch
 KVCache = Tuple[torch.Tensor, torch.Tensor]
+
+from concurrent.futures import ThreadPoolExecutor
 
 import time
 
@@ -109,7 +112,7 @@ class BlockAllocator:
             Move value tensor of the i-th layer, t-th token (i.e. kvcaches[i, 1, t, :, :]) to gpucache[i, 1, block.block_number, t, :, :]
             Needs to call `reshape_and_cache` since the shape of kvcaches do not match with the shape that vLLM internally uses to store KVCache
         """
-        
+    
         # gpu_cache: the GPU memory pool in vllm
         gpucache = CacheEngineManager.GetCacheEngine().gpu_cache
         block_size = block.block_size
@@ -132,7 +135,6 @@ class BlockAllocator:
             assert k.numel() == k_buffer[0].numel()
 
             # Map token i to the slot_mapping[i]-th position in gpu_cache
-            memcpy_timer.start()
             cache_ops.reshape_and_cache(
                 k,
                 v,
@@ -140,7 +142,6 @@ class BlockAllocator:
                 v_buffer,
                 torch.arange(block.block_number * block_size, block.block_number * block_size + block_size, device=k.device),
                 "auto")
-            memcpy_timer.pause()
             
             
     @staticmethod
@@ -165,6 +166,20 @@ class BlockAllocator:
             v = v_cache.permute(2,0,1)
             kvcaches.append(torch.stack([k, v]))
         return torch.stack(kvcaches)
+
+    @staticmethod
+    def fill_block_and_mark(
+        block: PhysicalTokenBlock
+    ):
+        block_hash = block.block_hash    
+        if block_hash not in loader:
+            return
+        # fill the block with pre-computed kvcaches from loader
+        kvcaches = loader[block_hash]
+        BlockAllocator.fill_block(kvcaches, block)
+        # mark the block as computed
+        block.computed = True
+        
     
 
     def allocate(self,
@@ -187,24 +202,14 @@ class BlockAllocator:
             assert block.block_hash == block_hash
             return block
         if block_hash not in self.cached_blocks:
-            self.cached_blocks[block_hash] = self.allocate_block(
+            block = self.allocate_block(
                 block_hash, num_hashed_tokens) 
-            
-            
-            if block_hash in loader:
-                loading_timer.start()
-                block = self.cached_blocks[block_hash]
-                kvcaches = loader[block_hash]
-                BlockAllocator.fill_block(kvcaches, block)
-                # mark the block as computed.
-                block.computed = True
-                loading_timer.pause()
-            else:
-                pass
+            self.cached_blocks[block_hash] = block
 
         block = self.cached_blocks[block_hash]
         assert block.block_hash == block_hash
         block.ref_count += 1
+        
         return block
 
     def free(self, block: PhysicalTokenBlock) -> None:
@@ -326,8 +331,23 @@ class BlockSpaceManager:
             else:
                 block = self.gpu_allocator.allocate(
                     seq.hash_of_block(logical_idx),
-                    seq.num_hashed_tokens_of_block(logical_idx))
+                    seq.num_hashed_tokens_of_block(logical_idx),
+                    )
             block_table.append(block)
+
+            
+        # get those blocks that can be loaded into KV cache.
+        fillable_blocks = []
+        for block in block_table:
+            if (not block.computed) and (block.block_hash in loader):
+                fillable_blocks.append(block)
+
+        # Pipeline the data loading process: Disk -> CPU -> temporary GPU memory -> vllm GPU memory
+        # Here we use threadpool to implement such pipelining
+        st = time.time()
+        for block in fillable_blocks:
+            BlockAllocator.fill_block_and_mark(block)
+        print('Data loading time: ', time.time() - st)
 
         # Assign the block table for each sequence.
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):

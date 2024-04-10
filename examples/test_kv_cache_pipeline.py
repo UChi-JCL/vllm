@@ -1,44 +1,45 @@
-
 import torch
 from pathlib import Path
 import time
-import concurrent.futures
-from tqdm import tqdm
-import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
 
-# without pipelining
+# Path to your cache
 kv_path = Path('/local/kuntai/cache/kvcache')
 
-cachegen = {}
+# This will be our queue to hold tensors ready to be moved to GPU
+tensor_queue = Queue()
 
+def load_tensor(file_path):
+    # Load the tensor from disk
+    tensor = torch.load(file_path)
+    # Put the loaded tensor into the queue
+    tensor_queue.put(tensor)
 
-st = time.time()
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
-futures = []
-for file in tqdm(list(kv_path.iterdir())):
-    futures.append(executor.submit(lambda x: torch.load(x).cuda(), file))
-executor.shutdown(wait=True)
-print('Total time: ', time.time() - st)
+def main():
+    # Start time measurement
+    st = time.time()
 
+    # List all files in the directory
+    files = list(kv_path.iterdir())
+    files = files + files + files
 
-st = time.time()
+    # Create a ThreadPoolExecutor for loading tensors
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit all files to be loaded in parallel
+        futures = [executor.submit(load_tensor, file) for file in files]
 
-for file in tqdm(list(kv_path.iterdir())):
-    hash_value = int(file.stem)
-    cachegen[hash_value] = torch.load(file)
-    
-print('Disk IO time: ', time.time() - st)
-st = time.time()
-    
-    
-for hash_value in tqdm(list(cachegen.keys())):
-    cachegen[hash_value].cuda()
-    
-print(np.mean([t.mean() for t in cachegen.values()]))
+        # Wait for all tensors to be loaded and added to the queue
+        for future in futures:
+            future.result()
 
-print('CPU -> GPU time: ', time.time() - st)
+    # Now, consume the tensors from the queue and move them to the GPU
+    while not tensor_queue.empty():
+        tensor = tensor_queue.get()
+        tensor.cuda()
+        tensor_queue.task_done()
 
+    print('CPU -> GPU time: ', time.time() - st)
 
-
-        
-    
+if __name__ == "__main__":
+    main()
