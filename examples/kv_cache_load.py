@@ -17,9 +17,9 @@ from vllm.kvloader.diskkvloader import DiskKVLoader
 from vllm.kvloader.diskcachegenloader import DiskCachegenLoader
 
 # # disk loader
-# vllm.core.block_manager.loader = DiskKVLoader("/local/kuntai/cache/kvcache")
+# vllm.core.block_manager.loader = DiskKVLoader("/local/share/cache_layer/kvcache")
 # cachegen loader
-vllm.core.block_manager.loader = DiskCachegenLoader("/local/kuntai/cache/kvcache_compressed")
+vllm.core.block_manager.loader = DiskCachegenLoader("/local/share/cache_layer/kvcache_compressed_cpu")
 
 
 
@@ -42,7 +42,6 @@ llm = LLM(model="TheBloke/CodeLlama-34B-AWQ", enable_prefix_caching=True, enforc
 # for file in tqdm(list(kv_path.iterdir())):
 #     loader.cache[int(file.stem)] = torch.load(file)
 # print('Disk -> CPU time: ', time.time() - st)
-
 
 
 total_timer = Timer()
