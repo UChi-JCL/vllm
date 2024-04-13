@@ -171,6 +171,7 @@ class LLM:
                               sampling_params,
                               token_ids,
                               lora_request=lora_request)
+            
         return self._run_engine(use_tqdm)
 
     def _add_request(

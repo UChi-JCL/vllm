@@ -119,7 +119,7 @@ class BlockAllocator:
         assert block.device == Device.GPU
         
         # move kvcaches to GPU
-        kvcaches = kvcaches.to(gpucache[0][0].device, non_blocking=True)
+        kvcaches = kvcaches.to(gpucache[0][0].device).contiguous()
         
         assert kvcaches.shape[1] == 2
         assert kvcaches.shape[2] == block_size
@@ -129,18 +129,19 @@ class BlockAllocator:
         # check if v.numel() == v_dst.numel() on layer 1
         assert kvcaches[0][1].numel() == gpucache[0][1][block.block_number].numel()
         
-        for layer, kvcache in enumerate(kvcaches):
-            k, v = kvcache[0], kvcache[1]
-            k_buffer, v_buffer = gpucache[layer]
-            assert k.numel() == k_buffer[0].numel()
+        slot_mapping = torch.arange(block.block_number * block_size, block.block_number * block_size + block_size, device=gpucache[0][0].device)
+
+        
+        for idx, kvbuffer in enumerate(gpucache):
+            k_buffer, v_buffer = kvbuffer
 
             # Map token i to the slot_mapping[i]-th position in gpu_cache
             cache_ops.reshape_and_cache(
-                k,
-                v,
+                kvcaches[idx, 0, ...],
+                kvcaches[idx, 1, ...],
                 k_buffer,
                 v_buffer,
-                torch.arange(block.block_number * block_size, block.block_number * block_size + block_size, device=k.device),
+                slot_mapping,
                 "auto")
             
             

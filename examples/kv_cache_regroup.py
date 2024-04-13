@@ -9,14 +9,14 @@ CHUNK_SIZE=3200
 keymap = {}
 
 for idx, regrouped_keys in tqdm(enumerate(torch.split(keys, CHUNK_SIZE//32))):
-    
     # read all tensors
     tensors = [
-        torch.load(f'/local/share/cache/kvcache/{key}.pt')
+        torch.load(f'/local/share/cache_layer/kvcache/{key}.pt')
         for key in regrouped_keys
     ]
     
     tensors = torch.cat(tensors, dim=2)
+
     if tensors.shape[2] != CHUNK_SIZE:
         zeros = torch.zeros(
             tensors.shape[0], 
@@ -35,10 +35,10 @@ for idx, regrouped_keys in tqdm(enumerate(torch.split(keys, CHUNK_SIZE//32))):
         }
         offset += 32
         
-    torch.save(tensors, f'/local/share/cache/kvcache_regroup/{idx}.pt')
+    torch.save(tensors, f'temp/kvcache_regroup/{idx}.pt')
     
     
     
 
-torch.save(keymap, '/local/share/cache/kvcache_regroup/keymap.pt')
-torch.save(keymap, '/local/share/cache_layer/kvcache_compressed/keymap.pt')
+torch.save(keymap, 'temp/kvcache_regroup/keymap.pt')
+torch.save(keymap, 'temp/kvcache_compressed/keymap.pt')
