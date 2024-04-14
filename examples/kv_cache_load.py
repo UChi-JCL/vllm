@@ -20,10 +20,17 @@ from vllm.kvloader.disknaiveloader import DiskNaiveLoader
 disk="/workspace/"
 #disk="/local/"
 # disk loader
+<<<<<<< HEAD
 # vllm.core.block_manager.loader = DiskNaiveLoader("/workspace/share/cache_layer/kvcache_regroup")
 # vllm.core.block_manager.loader = DiskKVLoader(f"{disk}/share/cache_layer/kvcache")
 # cachegen loader
 vllm.core.block_manager.loader = DiskCachegenLoader(f"{disk}/share/cache_layer/kvcache_compressed_cpu/")
+=======
+vllm.core.block_manager.loader = DiskNaiveLoader("/workspace/share/cache_layer/kvcache_regroup")
+# vllm.core.block_manager.loader = DiskKVLoader(f"{disk}/share/cache_layer/kvcache")
+# cachegen loader
+# vllm.core.block_manager.loader = DiskCachegenLoader(f"{disk}/share/cache_layer/kvcache_compressed_cpu/")
+>>>>>>> 5907964b6bf27febafd99c88b13ca17be71864d8
 # naive load
 #vllm.core.block_manager.loader = {}
 
@@ -68,11 +75,13 @@ total_timer.start()
 # to search that part of code, grep loading_timer
 profiler.runctx('llm.generate(long_prompt, sampling_params)', globals(), locals())
 # output = llm.generate(long_prompt, sampling_params)
+# profiler.runctx('llm.generate(long_prompt, sampling_params)', globals(), locals())
 total_timer.pause()
 
 # prof.disable_by_count()
 # prof.print_stats()
 profiler.dump_stats('profiles/naive.prof')
+# profiler.dump_stats('profiles/naive.prof')
 print('Total time: ', total_timer.total_time)
 print('Loading time (CPU -> GPU + GPU memcpy)', loading_timer.total_time)
 print('GPU memcpy time: ', memcpy_timer.total_time)
