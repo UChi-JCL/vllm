@@ -43,6 +43,8 @@ def decode_function(encoded_file, quantization_config, model_config, CHUNK_SIZE,
     Outputs:
     - key: the decoded key tensor in the shape of (layers, num_heads, tokens, heads_dim)
     """
+    print(quantization_config)
+    print(model_config)
     config = quantization_config
     start_time = time.monotonic()
     # encoded_file = pickle.load(open(encoded_file, "rb"))
@@ -72,10 +74,11 @@ def decode_function(encoded_file, quantization_config, model_config, CHUNK_SIZE,
         model_config["hidden_dim"]))
     key = out[0].half()
     value = out[1].half()
-    max_tensors_k = max_tensors_k.pin_memory()
+    #max_tensors_k = max_tensors_k.pin_memory()
     max_tensors_k = max_tensors_k.cuda()
-    max_tensors_v = max_tensors_v.pin_memory()
+    #max_tensors_v = max_tensors_v.pin_memory()
     max_tensors_v = max_tensors_v.cuda()
+
     for l in range(key.shape[0]):
         if l < config["key_first_layers"]:
             os.environ['BINS'] = config["key_first_bins"]
@@ -84,12 +87,14 @@ def decode_function(encoded_file, quantization_config, model_config, CHUNK_SIZE,
         else:
             os.environ['BINS'] = config["key_third_bins"]
         key[l] = quant(key[l] - int(os.environ['BINS']) // 2 + 1, max_tensors_k[l, :CHUNK_SIZE])
+
     for l in range(value.shape[0]):
         if l < config["value_first_layers"]:
             os.environ['BINS'] = config["value_first_bins"]
         else:
             os.environ['BINS'] = config["value_second_bins"]
         value[l] = quant(value[l] - (int(os.environ['BINS']) // 2- 1), max_tensors_v[l, :CHUNK_SIZE] )
+
     key = key.reshape(
         key.shape[0],
         1,
@@ -140,16 +145,17 @@ class DiskCachegenLoader(KVLoaderBase):
         self.config = torch.load(self.root / "keymap.pt")
         self.cached_tensor = {}
 
-        self.model_config = json.load(open("/local/share/config/codellama_34b_awq.json", "r"))
-        self.quant_config = json.load(open("/local/share/config/quantization_7b.json", "r"))
-        self.output = torch.zeros( (3200, 96 * 1024 )).cuda().to(torch.int)
+        self.model_config = json.load(open("/workspace/share/config/codellama_34b_awq.json", "r"))
+        self.quant_config = json.load(open("/workspace/share/config/quantization_7b.json", "r"))
+        self.output = torch.zeros( (3200, 64 * 1024 )).to(torch.int).cuda()
         self.dataloader = None
     def __setitem__(self, hash: int, kvcache: torch.Tensor):
         raise NotImplementedError
     
     def __getitem__(self, hash: int) -> Optional[torch.Tensor]:
-        idx = self.config[hash]["idx"]
-        offset = self.config[hash]["offset"]
+        keymap = self.config[hash]
+        idx = keymap["idx"]
+        offset = keymap["offset"]
         # print("idx", idx, "offset", offset, "hash", hash)
 
         if idx not in self.cached_tensor:
@@ -157,17 +163,23 @@ class DiskCachegenLoader(KVLoaderBase):
             st = time.monotonic()
 
             if self.dataloader is None:
-                self.dataloader = iter(torch.utils.data.DataLoader(CachegenDataset(data_dir=self.root, num_samples=5), batch_size=1, shuffle=False, num_workers=1, ))
+                a = time.monotonic()
+                dataset = CachegenDataset(data_dir=self.root, num_samples=11)
+                b = time.monotonic()
+                print("Dataset:", b-a)
+                # self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, prefetch_factor=1 ))
+                self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0,))
+                print("Dataloader:", time.monotonic() - b)
             print("reallocating")
             del self.cached_tensor
             self.cached_tensor = {}
             print("IDX: ", idx)
             encoded_data = next(self.dataloader)
+            # encoded_data = pickle.load(open(f"{self.root}/{idx}.pkl", "rb")) #next(self.dataloader)
             for key in encoded_data:
                 # remove the batch dimension.
                 encoded_data[key] = encoded_data[key].squeeze(0)
             self.cached_tensor[idx] = decode_function(
-                # f"{self.root}/{idx}.pkl",
                 encoded_data,
                 self.quant_config,
                 self.model_config,
