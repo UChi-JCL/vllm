@@ -43,8 +43,6 @@ def decode_function(encoded_file, quantization_config, model_config, CHUNK_SIZE,
     Outputs:
     - key: the decoded key tensor in the shape of (layers, num_heads, tokens, heads_dim)
     """
-    print(quantization_config)
-    print(model_config)
     config = quantization_config
     start_time = time.monotonic()
     # encoded_file = pickle.load(open(encoded_file, "rb"))
@@ -167,8 +165,8 @@ class DiskCachegenLoader(KVLoaderBase):
                 dataset = CachegenDataset(data_dir=self.root, num_samples=11)
                 b = time.monotonic()
                 print("Dataset:", b-a)
-                # self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, prefetch_factor=1 ))
-                self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0,))
+                self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, prefetch_factor=1 ))
+                # self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0,))
                 print("Dataloader:", time.monotonic() - b)
             print("reallocating")
             del self.cached_tensor

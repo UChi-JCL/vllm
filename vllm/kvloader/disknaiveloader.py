@@ -25,7 +25,7 @@ class DiskNaiveLoader(KVLoaderBase):
         self.dataloader = None
     def __setitem__(self, hash: int, kvcache: torch.Tensor):
         raise NotImplementedError
-    
+
     def __getitem__(self, hash: int) -> Optional[torch.Tensor]:
 
         keymap = self.config[hash]
@@ -34,7 +34,9 @@ class DiskNaiveLoader(KVLoaderBase):
         
         if idx not in self.cached_tensor:
             st = time.monotonic()
-            self.cached_tensor[idx] = torch.load(f"{self.root}/{idx}.pt")
+            del self.cached_tensor
+            self.cached_tensor = {}
+            self.cached_tensor[idx] = torch.load(f"{self.root}/{idx}.pt").cuda()
             print(f"Loaded {self.root}/{idx}.pt")
             print("Finished loading one file: ", time.monotonic() - st)
         #

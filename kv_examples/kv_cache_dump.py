@@ -29,10 +29,10 @@ print('Total inference time: ', total_timer.total_time)
 print(output[0].outputs[0].text)    # should be " You"
 
 
-# dump kv caches.
-hashed_blocks = llm.llm_engine.scheduler.block_manager.gpu_allocator.evictor.free_table
+# # dump kv caches.
+# hashed_blocks = llm.llm_engine.scheduler.block_manager.gpu_allocator.evictor.free_table
 
-for hash in tqdm(list(hashed_blocks.keys())):
-    block = hashed_blocks[hash]
-    torch.save(BlockAllocator.dump_block(block).cpu(), f'/workspace/share/cache_layer_mistral/kvcache/{hash}.pt')
+# for hash in tqdm(list(hashed_blocks.keys())):
+#     block = hashed_blocks[hash]
+#     torch.save(BlockAllocator.dump_block(block).cpu(), f'/workspace/share/cache_layer_mistral/kvcache/{hash}.pt')
 
