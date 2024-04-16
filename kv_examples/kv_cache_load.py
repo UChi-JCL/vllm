@@ -69,12 +69,12 @@ total_timer.pause()
 
 # prof.disable_by_count()
 # prof.print_stats()
-# if vllm.core.block_manager.loader == {}:
-#     profiler.dump_stats('profiles/recomp.prof')
-# elif isinstance(vllm.core.block_manager.loader, DiskNaiveLoader):
-#     profiler.dump_status('profiles/naive.prof')
-# elif isinstance(vllm.core.block_manager.loader, DiskCachegenLoader):
-#     profiler.dump_status('profiles/cachegen.prof')
+if vllm.core.block_manager.loader == {}:
+    profiler.dump_stats('profiles/recomp.prof')
+elif isinstance(vllm.core.block_manager.loader, DiskNaiveLoader):
+    profiler.dump_stats('profiles/naive.prof')
+elif isinstance(vllm.core.block_manager.loader, DiskCachegenLoader):
+    profiler.dump_stats('profiles/cachegen.prof')
 print('Total time: ', total_timer.total_time)
 print('Loading time (CPU -> GPU + GPU memcpy)', loading_timer.total_time)
 print('GPU memcpy time: ', memcpy_timer.total_time)

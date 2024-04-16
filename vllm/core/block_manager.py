@@ -88,9 +88,10 @@ class BlockAllocator:
         self.current_num_blocks += 1
         return block
 
+
     
     @staticmethod
-    def fill_block( 
+    def fill_block(
             kvcaches: torch.Tensor, 
             block: PhysicalTokenBlock
         ):
@@ -144,6 +145,63 @@ class BlockAllocator:
                 slot_mapping,
                 "auto")
             
+    @staticmethod
+    def fill_block_new(
+            kcaches: torch.Tensor, 
+            vcaches: torch.Tensor,
+            block: PhysicalTokenBlock
+        ):
+        """
+        Fill a block of single-layered KV cache
+
+        Input:
+            kvcaches: a tensor with shape (num_layers, num_tokens, num_heads, head_size)
+                kvcaches[i, t, :, :] is the key tensor of the i-th layer, t-th token
+                kvcaches[i, t, :, :] is the value tensor of the i-th layer, t-th token
+                num_layers: the number of layers in the served model
+                num_tokens: the # of tokens
+                num_heads: the number of heads
+                head_size: the size of a head
+            block: a block in vllm's block table
+            
+        Behavior:
+            Move key tensor of the i-th layer, t-th token (i.e. kvcaches[i, 0, t, :, :]) to gpucache[i, 0, block.block_number, t, :, :]
+            Move value tensor of the i-th layer, t-th token (i.e. kvcaches[i, 1, t, :, :]) to gpucache[i, 1, block.block_number, t, :, :]
+            Needs to call `reshape_and_cache` since the shape of kvcaches do not match with the shape that vLLM internally uses to store KVCache
+        """
+    
+        # gpu_cache: the GPU memory pool in vllm
+        gpucache = CacheEngineManager.GetCacheEngine().gpu_cache
+        block_size = block.block_size
+        assert block.device == Device.GPU
+        
+        # move kvcaches to GPU
+        kcaches = kcaches.to(gpucache[0][0].device)
+        vcaches = vcaches.to(gpucache[0][0].device)
+        
+        assert kcaches.shape == vcaches.shape
+        assert kcaches.shape[1] == block_size
+        assert torch.is_floating_point(kcaches)
+        assert torch.is_floating_point(vcaches)
+        # check if k.numel() == k_dst.numel() on layer 0
+        assert kcaches[0].numel() == gpucache[0][0][block.block_number].numel()
+        # check if v.numel() == v_dst.numel() on layer 1
+        assert vcaches[0].numel() == gpucache[0][1][block.block_number].numel()
+        
+        slot_mapping = torch.arange(block.block_number * block_size, block.block_number * block_size + block_size, device=gpucache[0][0].device)
+
+        
+        for idx, kvbuffer in enumerate(gpucache):
+            k_buffer, v_buffer = kvbuffer
+
+            # Map token i to the slot_mapping[i]-th position in gpu_cache
+            cache_ops.reshape_and_cache(
+                kcaches[idx],
+                vcaches[idx],
+                k_buffer,
+                v_buffer,
+                slot_mapping,
+                "auto")
             
     @staticmethod
     def dump_block(
@@ -177,7 +235,10 @@ class BlockAllocator:
             return
         # fill the block with pre-computed kvcaches from loader
         kvcaches = loader[block_hash]
-        BlockAllocator.fill_block(kvcaches, block)
+        # BlockAllocator.fill_block(kvcaches, block)
+        if isinstance(kvcaches, torch.Tensor):
+            kvcaches = kvcaches[:, 0, ...], kvcaches[:, 1, ...]
+        BlockAllocator.fill_block_new(kvcaches[0], kvcaches[1], block)
         # mark the block as computed
         block.computed = True
         

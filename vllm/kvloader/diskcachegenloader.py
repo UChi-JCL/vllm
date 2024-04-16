@@ -65,7 +65,7 @@ def decode_function(encoded_file, quantization_config, model_config, CHUNK_SIZE,
     start_indices = torch.tensor(start_indices).int().cuda()
     out = torchac_cuda.decode_fast(output, cdf.unsqueeze(0), concated_string, \
         start_indices, CHUNK_SIZE, nlayers * scale, 800, scale)
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
     print("kernel computation time: ", time.monotonic() - kernel_start)
     # out = torchac_cuda.decode(output, cdf.unsqueeze(0), bits,  6000, 60, 100)
     out = output.reshape((2, max_tensors_k.shape[0], CHUNK_SIZE, \
@@ -95,17 +95,16 @@ def decode_function(encoded_file, quantization_config, model_config, CHUNK_SIZE,
 
     key = key.reshape(
         key.shape[0],
-        1,
         key.shape[1],
         model_config["num_heads"],
         model_config["heads_dim"])
     value = value.reshape(
         value.shape[0],
-        1,
         value.shape[1],
         model_config["num_heads"],
         model_config["heads_dim"])
-    out = torch.cat([key, value], dim=1)
+    # out = torch.cat([key, value], dim=1)
+    out = (key, value)
     torch.cuda.synchronize()
     print("per iteration total time: ", time.monotonic() - start_time)
     return out
@@ -160,23 +159,24 @@ class DiskCachegenLoader(KVLoaderBase):
 
             st = time.monotonic()
 
-            if self.dataloader is None:
-                a = time.monotonic()
-                dataset = CachegenDataset(data_dir=self.root, num_samples=11)
-                b = time.monotonic()
-                print("Dataset:", b-a)
-                self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, prefetch_factor=1 ))
-                # self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0,))
-                print("Dataloader:", time.monotonic() - b)
+            # if self.dataloader is None:
+            #     a = time.monotonic()
+            #     dataset = CachegenDataset(data_dir=self.root, num_samples=11)
+            #     b = time.monotonic()
+            #     print("Dataset:", b-a)
+            #     # self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, prefetch_factor=1 ))
+            #     self.dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0,))
+            #     print("Dataloader:", time.monotonic() - b)
+            
             print("reallocating")
             del self.cached_tensor
             self.cached_tensor = {}
             print("IDX: ", idx)
-            encoded_data = next(self.dataloader)
-            # encoded_data = pickle.load(open(f"{self.root}/{idx}.pkl", "rb")) #next(self.dataloader)
-            for key in encoded_data:
-                # remove the batch dimension.
-                encoded_data[key] = encoded_data[key].squeeze(0)
+            # encoded_data = next(self.dataloader)
+            encoded_data = pickle.load(open(f"{self.root}/{idx}.pkl", "rb")) #next(self.dataloader)
+            # for key in encoded_data:
+            #     # remove the batch dimension.
+            #     encoded_data[key] = encoded_data[key].squeeze(0)
             self.cached_tensor[idx] = decode_function(
                 encoded_data,
                 self.quant_config,
@@ -185,7 +185,7 @@ class DiskCachegenLoader(KVLoaderBase):
                 self.output
             )
             print('End-to-end time: ', time.monotonic() - st)
-        return self.cached_tensor[idx][:, :, offset:offset+32, :, :]
+        return (self.cached_tensor[idx][0][:, offset:offset+32, :, :], self.cached_tensor[idx][1][:, offset:offset+32, :, :])
     
     def __contains__(self, hash: int) -> bool:
         return hash in self.config

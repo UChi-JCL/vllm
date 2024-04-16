@@ -75,7 +75,7 @@ total_timer.pause()
 # elif isinstance(vllm.core.block_manager.loader, DiskNaiveLoader):
 #     profiler.dump_status('profiles/naive.prof')
 # elif isinstance(vllm.core.block_manager.loader, DiskCachegenLoader):
-profiler.dump_status('profiles/cachegen.prof')
+profiler.dump_stats('profiles/cachegen.prof')
 print('Total time: ', total_timer.total_time)
 print('Loading time (CPU -> GPU + GPU memcpy)', loading_timer.total_time)
 print('GPU memcpy time: ', memcpy_timer.total_time)
