@@ -397,6 +397,7 @@ class BlockSpaceManager:
                     )
             block_table.append(block)
 
+
             
         # get those blocks that can be loaded into KV cache.
         fillable_blocks = []
@@ -404,14 +405,16 @@ class BlockSpaceManager:
             if (not block.computed) and (block.block_hash in loader):
                 fillable_blocks.append(block)
 
-        torch.save([i.block_hash for i in block_table], "hash_sequence.pt")
+        # torch.save([i.block_hash for i in block_table], "hash_sequence.pt")
 
         # Pipeline the data loading process: Disk -> CPU -> temporary GPU memory -> vllm GPU memory
         # Here we use threadpool to implement such pipelining
         st = time.time()
         for block in fillable_blocks:
             BlockAllocator.fill_block_and_mark(block)
-        print('Data loading time: ', time.time() - st)
+        # print('Data loading time: ', time.time() - st)
+        # print('\n')
+
 
         # Assign the block table for each sequence.
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
